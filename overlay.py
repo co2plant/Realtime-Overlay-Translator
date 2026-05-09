@@ -1,47 +1,93 @@
-import win32api, win32con, pywintypes
+"""
+Transparent overlay window for displaying translated text on screen.
+"""
+
+import logging
+
+import pywintypes
 import tkinter
+import win32api
+import win32con
+
+logger = logging.getLogger(__name__)
+
+# Click-through window style
+_EX_STYLE = (
+    win32con.WS_EX_COMPOSITED
+    | win32con.WS_EX_LAYERED
+    | win32con.WS_EX_NOACTIVATE
+    | win32con.WS_EX_TOPMOST
+    | win32con.WS_EX_TRANSPARENT
+)
+
+# The colour key used for transparency
+_TRANSPARENT_COLOUR = "#add123"
 
 
-class Overlay():
-    width = 0
-    height = 0
-    window_name = None
+class Overlay:
+    """Full-screen transparent overlay that renders text labels on top of other windows."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.win = tkinter.Tk()
-        #self.win = tkinter.Toplevel(window,relief="solid",bd = 2) #윈도우 객체 생성
-        self.win.config(bg = "#add123") #윈도우 백그라운드 컬러 설정 ##add123
-        self.win.config(highlightbackground= "#add123")
-        #self.win.geometry(str(width)+"x"+str(heigh)+"+"+str(x)+"+"+str(y))
-        self.win.wm_attributes('-transparentcolor','#add123') # 설정한 컬러 투명화
-        self.win.attributes("-fullscreen", True) # 전체화면
-        self.win.wm_attributes("-topmost", True) # 윈도우가 항상 우선순위됨
-        self.win.wm_attributes("-disabled", True) # 윈도우가 사리지지않음
-        self.win.overrideredirect(True) # 작업표시줄 삭제
-        print("overlay 창 생성 완료")
-        
-        
-    def labeler(self,text_, x_, y_, width_, height_, fontsize_): # 윈도우창,텍스트,좌표x,좌표y
-        print("Call overlay - labeler")
-        label=tkinter.Label(self.win, text=text_, font=('Times',fontsize_), fg="white", bg="black") #라벨 객체 생성 , bg='black'
-        label.place(x=x_,y=y_) # 라벨 위치 설정
+        self.win.config(bg=_TRANSPARENT_COLOUR)
+        self.win.config(highlightbackground=_TRANSPARENT_COLOUR)
+        self.win.wm_attributes("-transparentcolor", _TRANSPARENT_COLOUR)
+        self.win.attributes("-fullscreen", True)
+        self.win.wm_attributes("-topmost", True)
+        self.win.wm_attributes("-disabled", True)
+        self.win.overrideredirect(True)
+
+        self._labels: list[tkinter.Label] = []
+        logger.info("Overlay window created")
+
+    # ------------------------------------------------------------------
+    # Label management
+    # ------------------------------------------------------------------
+
+    def clear_labels(self) -> None:
+        """Remove all previously placed labels."""
+        for label in self._labels:
+            label.destroy()
+        self._labels.clear()
+
+    def labeler(
+        self,
+        text: str,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        font_size: int,
+    ) -> None:
+        """Create and place a text label at the given screen coordinates."""
+        logger.debug("Label at (%d, %d): %s", x, y, text)
+        label = tkinter.Label(
+            self.win,
+            text=text,
+            font=("Times", font_size),
+            fg="white",
+            bg="black",
+        )
+        label.place(x=x, y=y)
         label.configure(anchor="center")
         label.master.wm_attributes("-alpha", "1")
         label.master.lift()
-        hWindow = pywintypes.HANDLE(int(label.master.frame(), 16)) # 클릭 무시
-        exStyle = win32con.WS_EX_COMPOSITED | win32con.WS_EX_LAYERED | win32con.WS_EX_NOACTIVATE | win32con.WS_EX_TOPMOST | win32con.WS_EX_TRANSPARENT # 클릭무시 222
-        win32api.SetWindowLong(hWindow, win32con.GWL_EXSTYLE, exStyle) #클릭 무시 3333
-        print("라벨생성 중...", x_, y_)
 
-    def stop(self):
-        for i in self.win.winfo_children():
-            i.destroy()
-    def start(self):
+        h_window = pywintypes.HANDLE(int(label.master.frame(), 16))
+        win32api.SetWindowLong(h_window, win32con.GWL_EXSTYLE, _EX_STYLE)
+
+        self._labels.append(label)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def stop(self) -> None:
+        """Destroy all child widgets."""
+        for child in self.win.winfo_children():
+            child.destroy()
+        self._labels.clear()
+
+    def start(self) -> None:
+        """Enter the Tk main loop."""
         self.win.mainloop()
-
-    def setWindow_Name(self, window_name):
-        self.window_name = window_name
-
-    
-    
-    
