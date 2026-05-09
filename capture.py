@@ -1,102 +1,123 @@
-import numpy as np
+"""
+Screen capture module using Win32 API.
+"""
+
+import logging
+from typing import Sequence
+
 import cv2
-import win32gui, win32ui, win32con
+import numpy as np
+import win32con
+import win32gui
+import win32ui
+
+from config import Config
+
+logger = logging.getLogger(__name__)
+
+# Resolve base directory for saving screenshots
+import os
+
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 class Capture:
-    selected_window_name=None
-    width = 0
-    height = 0
-    hwnd = None
-    cropped_x = 0
-    cropped_y = 0
-    offset_x = 0
-    offset_y = 0
-    before_img = None
-    
-    def __init__(self, window_name=None):
+    """Captures screenshots of a target window via the Win32 GDI API."""
+
+    def __init__(self, window_name: str | None = None) -> None:
         if window_name is None:
-            self.hwnd = win32gui.GetDesktopWindow()
-        else :
-            self.selected_window_name = window_name
-            self.hwnd = win32gui.FindWindow(None, window_name)
-            print(self.hwnd)
-            if not self.hwnd:
-                raise Exception('Window not found: {}'.format(window_name))
-        global left, top, right, bottom
-        left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
-        self.width = right-left
-        self.height = bottom-top
-        
+            self._hwnd = win32gui.GetDesktopWindow()
+        else:
+            self._hwnd = win32gui.FindWindow(None, window_name)
+            logger.info("Window handle for '%s': %s", window_name, self._hwnd)
+            if not self._hwnd:
+                raise Exception(f"Window not found: {window_name}")
+
+        left, top, right, bottom = win32gui.GetWindowRect(self._hwnd)
+        self._width = right - left
+        self._height = bottom - top
+
         border_pixels = 0
         titlebar_pixels = 0
-        self.width = self.width - border_pixels #* 2)
-        self.height = self.height - titlebar_pixels - border_pixels
-        self.cropped_x = border_pixels
-        self.cropped_y = titlebar_pixels
-        
-        # need to change for caputure title
-        # even if user don't want translate window title
-        # disable this function.
-        
-        self.offset_x = left + self.cropped_x
-        self.offset_y = top + self.cropped_y
-        
-    def get_screenshot(self):
-        wDC = win32gui.GetWindowDC(self.hwnd)
-        dcObj = win32ui.CreateDCFromHandle(wDC)
-        cDC = dcObj.CreateCompatibleDC()
-        dataBitMap = win32ui.CreateBitmap()
-        dataBitMap.CreateCompatibleBitmap(dcObj, self.width, self.height)
-        cDC.SelectObject(dataBitMap)
-        cDC.BitBlt((0, 0), (self.width, self.height), dcObj, (self.cropped_x, self.cropped_y), win32con.SRCCOPY)
-        
-        
-        signedIntsArray = dataBitMap.GetBitmapBits(True)
-        img = np.fromstring(signedIntsArray, dtype='uint8')
-        img.shape = (self.height, self.width, 4)
-        
-        dcObj.DeleteDC()
-        cDC.DeleteDC()
-        win32gui.ReleaseDC(self.hwnd, wDC)
-        win32gui.DeleteObject(dataBitMap.GetHandle())
-        
-        img = img[...,:3]
+        self._width -= border_pixels
+        self._height -= titlebar_pixels + border_pixels
 
+        self._cropped_x = border_pixels
+        self._cropped_y = titlebar_pixels
+        self._offset_x = left + self._cropped_x
+        self._offset_y = top + self._cropped_y
+
+    # ------------------------------------------------------------------
+    # Screenshot
+    # ------------------------------------------------------------------
+
+    def get_screenshot(self) -> np.ndarray:
+        """Return a BGR numpy array of the target window's content."""
+        w_dc = win32gui.GetWindowDC(self._hwnd)
+        dc_obj = win32ui.CreateDCFromHandle(w_dc)
+        c_dc = dc_obj.CreateCompatibleDC()
+        bitmap = win32ui.CreateBitmap()
+        bitmap.CreateCompatibleBitmap(dc_obj, self._width, self._height)
+        c_dc.SelectObject(bitmap)
+        c_dc.BitBlt(
+            (0, 0),
+            (self._width, self._height),
+            dc_obj,
+            (self._cropped_x, self._cropped_y),
+            win32con.SRCCOPY,
+        )
+
+        signed_ints = bitmap.GetBitmapBits(True)
+        img = np.frombuffer(signed_ints, dtype="uint8")
+        img.shape = (self._height, self._width, 4)
+
+        # Release GDI resources
+        dc_obj.DeleteDC()
+        c_dc.DeleteDC()
+        win32gui.ReleaseDC(self._hwnd, w_dc)
+        win32gui.DeleteObject(bitmap.GetHandle())
+
+        # Drop alpha channel
+        img = img[..., :3]
         img = np.ascontiguousarray(img)
-        cv2.imwrite("images/img1.png", img)
-        cv2.destroyAllWindows()
+
+        screenshot_path = os.path.join(_BASE_DIR, "images", "img1.png")
+        cv2.imwrite(screenshot_path, img)
+
         return img
-    
-    @staticmethod
-    def list_window_names(listbox):
-        def winEnumHandler(hwnd, ctx):
-            if win32gui.IsWindowVisible(hwnd):
-                str = win32gui.GetWindowText(hwnd)
-                if not(str == ""):
-                    listbox.insert(-1, str)
-        win32gui.EnumWindows(winEnumHandler, None)
+
+    # ------------------------------------------------------------------
+    # Window enumeration
+    # ------------------------------------------------------------------
 
     @staticmethod
-    def list_window_names_array(arr):
-        def winEnumHandler(hwnd, ctx):
+    def list_window_names(target_list: list[str]) -> None:
+        """Populate *target_list* with visible window titles."""
+
+        def _enum_handler(hwnd, _ctx):
             if win32gui.IsWindowVisible(hwnd):
-                str = win32gui.GetWindowText(hwnd)
-                if not(str == ""):
-                    arr.append(str)
-        win32gui.EnumWindows(winEnumHandler, None)
-        
-    def get_screen_position(self, pos):
-        print(pos[0]+self.offset_x)
-        print(pos[1]+self.offset_y)
-        return(pos[0]+self.offset_x, pos[1]+self.offset_y)
-    
-    def get_screen_minimize(self):
-        statusofwindow = win32gui.GetWindowPlacement(self.hwnd)
-        if statusofwindow[1] == win32con.SW_SHOWMINIMIZED:
+                title = win32gui.GetWindowText(hwnd)
+                if title:
+                    target_list.append(title)
+
+        win32gui.EnumWindows(_enum_handler, None)
+
+    # ------------------------------------------------------------------
+    # Position helpers
+    # ------------------------------------------------------------------
+
+    def get_screen_position(self, pos: Sequence[int]) -> tuple[int, int]:
+        """Convert window-relative position to screen-absolute position."""
+        return (pos[0] + self._offset_x, pos[1] + self._offset_y)
+
+    def get_screen_minimize(self) -> int:
+        """Return 1 if the window is visible, 0 if minimised."""
+        placement = win32gui.GetWindowPlacement(self._hwnd)
+        if placement[1] == win32con.SW_SHOWMINIMIZED:
             return 0
-        elif statusofwindow[1] == win32con.SW_SHOWNORMAL:
-            return 1
-        
-    def get_rect(self):
-        left, top, right, bottom = win32gui.GetWindowRect(self.hwnd)
+        return 1
+
+    def get_rect(self) -> tuple[int, int]:
+        """Return the current (left, top) of the target window."""
+        left, top, _right, _bottom = win32gui.GetWindowRect(self._hwnd)
         return left, top
