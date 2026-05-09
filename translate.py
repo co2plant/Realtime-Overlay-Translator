@@ -1,60 +1,77 @@
+"""
+Translation module using Naver Papago API.
+"""
+
 import urllib.request
+import urllib.parse
 import json
+import logging
+
+from config import Config
+
+logger = logging.getLogger(__name__)
+
 
 class TranslatorPapago:
-    client_id=''
-    client_secret=''
+    """Translator that delegates to the Naver Papago NMT API."""
 
-    def __init__(self):
-        self.client_id = ""
-        self.client_secret = ""
+    def __init__(self) -> None:
+        self._config = Config()
 
-    def set_client_id(self, client_id_input):
-        self.client_id = client_id_input
+    # -- credential access (backed by Config singleton) ----------------
 
-    def set_client_secret(self, client_secret_input):
-        self.client_secret = client_secret_input
+    @property
+    def client_id(self) -> str:
+        return self._config.client_id
 
-    def get_translate(self, input_text, native_language, target_language):
-        print("Call translate - GetTranslate")
-        encText = urllib.parse.quote(input_text)
-        data = "source="+native_language+"&target="+target_language+"&text="+encText
+    @property
+    def client_secret(self) -> str:
+        return self._config.client_secret
+
+    def set_client_id(self, client_id: str) -> None:
+        self._config.client_id = client_id
+
+    def set_client_secret(self, client_secret: str) -> None:
+        self._config.client_secret = client_secret
+
+    # -- translation ---------------------------------------------------
+
+    def get_translate(
+        self,
+        input_text: str,
+        native_language: str | None = None,
+        target_language: str | None = None,
+    ) -> str | None:
+        """Translate *input_text* from *native_language* to *target_language*.
+
+        Returns the translated string on success, or ``None`` on failure.
+        """
+        if native_language is None:
+            native_language = self._config.translate_source_lang
+        if target_language is None:
+            target_language = self._config.translate_target_lang
+
+        logger.info("Translating: %s (%s → %s)", input_text, native_language, target_language)
+
+        enc_text = urllib.parse.quote(input_text)
+        data = f"source={native_language}&target={target_language}&text={enc_text}"
         url = "https://openapi.naver.com/v1/papago/n2mt"
+
         try:
             request = urllib.request.Request(url)
-            request.add_header("X-Naver-Client-Id",self.client_id)
-            request.add_header("X-Naver-Client-Secret",self.client_secret)
-        except :
-            print("no license")
-        response = urllib.request.urlopen(request, data=data.encode("utf-8"))
+            request.add_header("X-Naver-Client-Id", self.client_id)
+            request.add_header("X-Naver-Client-Secret", self.client_secret)
+            response = urllib.request.urlopen(request, data=data.encode("utf-8"))
+        except Exception as exc:
+            logger.error("Translation request failed: %s", exc)
+            return None
+
         response_code = response.getcode()
-        if(response_code==200):
+        if response_code == 200:
             response_body = response.read()
-            decode = json.loads(response_body.decode('utf-8'))    
-            result = decode['message']['result']['translatedText']    
+            decoded = json.loads(response_body.decode("utf-8"))
+            result = decoded["message"]["result"]["translatedText"]
             return result
         else:
-            print("Error Code:" + response_code)
-"""
-    def readReferenceInfo(directory):
-        try:
-            if not os.path.exists(directory):
-                    if not os.path.isfile("./CSV/"+file_name+".csv"):
-                    self.saveDictionary("------","------",file_name)
-                with open("./CSV/"+file_name+".csv", newline='',encoding='UTF8') as f:
-                    reader = csv.reader(f)
-                    data = list(reader)
-                if(len(data) == 0):
-                    return False
-                for i in range(0, len(data)):
-                    if(data[i][0] == input_text):
-                        return data[i][1]
-        except:
-
-
-    def writeReferenceInfo(directory):
-        try:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-        except OSError:
-            print('')"""
+            logger.error("Translation API returned error code: %s", response_code)
+            return None
