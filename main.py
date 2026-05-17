@@ -268,8 +268,15 @@ class App(_AppBase):
         logger.info("Detecting visible windows")
         capture_backend = create_capture_backend(self._config)
         windows = capture_backend.list_windows()
-        self._window_title_to_id = {window.title: window.id for window in windows}
-        window_names = [window.title for window in windows]
+        title_counts: dict[str, int] = {}
+        window_names: list[str] = []
+        self._window_title_to_id = {}
+        for window in windows:
+            count = title_counts.get(window.title, 0) + 1
+            title_counts[window.title] = count
+            display_label = window.title if count == 1 else f"{window.title} ({count})"
+            window_names.append(display_label)
+            self._window_title_to_id[display_label] = window.id
         self._combo.configure(values=window_names)
         if window_names:
             self._combo.set(window_names[0])

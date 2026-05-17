@@ -39,6 +39,14 @@ class FakeCaptureBackend:
         return [WindowInfo(id="opaque-id", title="Display Title")]
 
 
+class FakeDuplicateTitleCaptureBackend:
+    def list_windows(self):
+        return [
+            WindowInfo(id="a", title="Chrome"),
+            WindowInfo(id="b", title="Chrome"),
+        ]
+
+
 class FakeEntry:
     def __init__(self, value):
         self.value = value
@@ -115,6 +123,28 @@ class MainBackendLabelTests(unittest.TestCase):
         self.assertEqual(app._combo.values, ["Display Title"])
         self.assertEqual(app._combo.selected, "Display Title")
         self.assertEqual(app._window_name, "opaque-id")
+
+    def test_on_detect_disambiguates_duplicate_titles(self):
+        app = main.App.__new__(main.App)
+        app._config = FakeConfig()
+        app._combo = FakeCombo()
+        app._start_btn = FakeButton()
+
+        with patch.object(
+            main,
+            "create_capture_backend",
+            return_value=FakeDuplicateTitleCaptureBackend(),
+        ):
+            app._on_detect()
+
+        self.assertEqual(app._combo.values, ["Chrome", "Chrome (2)"])
+        self.assertEqual(app._window_title_to_id["Chrome"], "a")
+        self.assertEqual(app._window_title_to_id["Chrome (2)"], "b")
+        self.assertEqual(app._window_name, "a")
+
+        app._on_window_selected("Chrome (2)")
+
+        self.assertEqual(app._window_name, "b")
 
     def test_on_save_settings_stores_backend_credentials_and_papago_enabled(self):
         app = main.App.__new__(main.App)
