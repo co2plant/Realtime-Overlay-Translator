@@ -9,13 +9,19 @@ import logging
 import os
 import sys
 
-import customtkinter
-from PIL import Image
-
 from config import Config
-from capture import Capture
-from overlay import Overlay
 from pipeline import TranslationPipeline
+from platforms.base import OverlayBackend
+from platforms.factory import create_capture_backend, create_overlay_backend
+
+try:
+    import customtkinter
+    from PIL import Image
+except ModuleNotFoundError:
+    customtkinter = None
+    Image = None
+
+_AppBase = customtkinter.CTk if customtkinter is not None else object
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -33,16 +39,26 @@ logger = logging.getLogger(__name__)
 _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 _IMAGE_DIR = os.path.join(_BASE_DIR, "images")
 
+BACKEND_LABEL_TO_VALUE = {
+    "테스트 번역기": "local_dummy",
+    "Papago API": "papago",
+    "번역 비활성화": "disabled",
+}
+BACKEND_VALUE_TO_LABEL = {value: label for label, value in BACKEND_LABEL_TO_VALUE.items()}
 
-class App(customtkinter.CTk):
+
+class App(_AppBase):
     """Main application window."""
 
     def __init__(self) -> None:
+        if customtkinter is None or Image is None:
+            raise RuntimeError("customtkinter and Pillow are required to start the GUI")
+
         super().__init__()
 
         self._config = Config()
         self._window_name: str | None = None
-        self._overlay: Overlay | None = None
+        self._overlay: OverlayBackend | None = None
         self._pipeline: TranslationPipeline | None = None
 
         self.title("Bridge - RealtimeOverlayTranslator")
@@ -185,23 +201,37 @@ class App(customtkinter.CTk):
         self._settings_frame = customtkinter.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self._settings_frame.grid_columnconfigure(0, weight=1)
 
-        customtkinter.CTkLabel(self._settings_frame, text="Client ID:").grid(
+        customtkinter.CTkLabel(self._settings_frame, text="번역 방식:").grid(
             row=0, column=0, padx=20, pady=10,
         )
+        selected_backend = BACKEND_VALUE_TO_LABEL.get(
+            self._config.translation_backend,
+            "테스트 번역기",
+        )
+        self._backend_menu = customtkinter.CTkOptionMenu(
+            self._settings_frame,
+            values=list(BACKEND_LABEL_TO_VALUE.keys()),
+        )
+        self._backend_menu.grid(row=1, column=0, padx=20, pady=10)
+        self._backend_menu.set(selected_backend)
+
+        customtkinter.CTkLabel(self._settings_frame, text="Client ID:").grid(
+            row=2, column=0, padx=20, pady=10,
+        )
         self._entry_id = customtkinter.CTkEntry(self._settings_frame)
-        self._entry_id.grid(row=1, column=0, padx=20, pady=10)
+        self._entry_id.grid(row=3, column=0, padx=20, pady=10)
         self._entry_id.insert(0, self._config.client_id)
 
         customtkinter.CTkLabel(self._settings_frame, text="Client Secret:").grid(
-            row=2, column=0, padx=20, pady=10,
+            row=4, column=0, padx=20, pady=10,
         )
         self._entry_secret = customtkinter.CTkEntry(self._settings_frame)
-        self._entry_secret.grid(row=3, column=0, padx=20, pady=10)
+        self._entry_secret.grid(row=5, column=0, padx=20, pady=10)
         self._entry_secret.insert(0, self._config.client_secret)
 
         customtkinter.CTkButton(
             self._settings_frame, text="Save", command=self._on_save_settings,
-        ).grid(row=4, column=0, padx=20, pady=20)
+        ).grid(row=6, column=0, padx=20, pady=20)
 
     # ==================================================================
     # Frame switching
@@ -235,11 +265,12 @@ class App(customtkinter.CTk):
 
     def _on_detect(self) -> None:
         logger.info("Detecting visible windows")
-        window_names: list[str] = []
-        Capture.list_window_names(window_names)
+        capture_backend = create_capture_backend(self._config)
+        window_names = [window.title for window in capture_backend.list_windows()]
         self._combo.configure(values=window_names)
         if window_names:
             self._combo.set(window_names[0])
+            self._on_window_selected(window_names[0])
 
     def _on_window_selected(self, choice: str) -> None:
         logger.info("Window selected: %s", choice)
@@ -251,32 +282,34 @@ class App(customtkinter.CTk):
         if self._window_name is None:
             return
 
-        # Tear down previous overlay if any
         if self._overlay is not None:
-            self._overlay.win.destroy()
+            self._overlay.destroy()
 
-        self._overlay = Overlay()
+        self._overlay = create_overlay_backend(self._config)
         self._pipeline = TranslationPipeline(self._window_name)
 
         interval = self._config.capture_interval_ms
-        self._overlay.win.after(interval, self._pipeline_tick)
-        self._overlay.win.mainloop()
+        self._overlay.after(interval, self._pipeline_tick)
+        self._overlay.run()
 
     def _pipeline_tick(self) -> None:
         """Run one pipeline cycle and schedule the next."""
         if self._overlay is None or self._pipeline is None:
             return
 
-        self._overlay.clear_labels()
-        self._pipeline.run_once(self._overlay.labeler)
-        self._overlay.win.update()
+        self._overlay.clear()
+        self._pipeline.run_once(self._overlay.show_text)
+        self._overlay.update()
 
         interval = self._config.capture_interval_ms
-        self._overlay.win.after(interval, self._pipeline_tick)
+        self._overlay.after(interval, self._pipeline_tick)
 
     def _on_save_settings(self) -> None:
+        backend_label = self._backend_menu.get()
+        self._config.translation_backend = BACKEND_LABEL_TO_VALUE[backend_label]
         self._config.client_id = self._entry_id.get()
         self._config.client_secret = self._entry_secret.get()
+        self._config.papago_enabled = self._config.translation_backend == "papago"
         logger.info("Settings saved")
 
     # ==================================================================
@@ -286,7 +319,7 @@ class App(customtkinter.CTk):
     def on_closing(self) -> None:
         """Clean shutdown — destroy overlay then main window."""
         if self._overlay is not None:
-            self._overlay.win.destroy()
+            self._overlay.destroy()
         self.destroy()
 
 
