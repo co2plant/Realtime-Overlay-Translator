@@ -147,6 +147,40 @@ class PlatformFactoryTests(unittest.TestCase):
 
         self.assertEqual(names, ["Alpha", "Beta"])
 
+    def test_windows_capture_list_windows_uses_hwnd_ids_for_duplicate_titles(self):
+        from platforms.windows import capture as windows_capture
+        from platforms.windows.capture import WindowsCaptureBackend
+
+        def enum_windows(callback, ctx):
+            callback(101, ctx)
+            callback(202, ctx)
+
+        with (
+            patch.object(windows_capture.win32gui, "EnumWindows", side_effect=enum_windows),
+            patch.object(windows_capture.win32gui, "IsWindowVisible", return_value=True),
+            patch.object(windows_capture.win32gui, "GetWindowText", side_effect=["Game", "Game"]),
+        ):
+            windows = WindowsCaptureBackend._list_windows()
+
+        self.assertEqual([window.id for window in windows], ["101", "202"])
+        self.assertEqual([window.title for window in windows], ["Game", "Game"])
+
+    def test_windows_capture_select_window_accepts_hwnd_string_without_title_lookup(self):
+        from platforms.windows import capture as windows_capture
+        from platforms.windows.capture import WindowsCaptureBackend
+
+        backend = WindowsCaptureBackend.__new__(WindowsCaptureBackend)
+
+        with (
+            patch.object(windows_capture.win32gui, "IsWindow", return_value=True),
+            patch.object(windows_capture.win32gui, "FindWindow") as find_window,
+            patch.object(backend, "_set_hwnd") as set_hwnd,
+        ):
+            backend.select_window("12345")
+
+        find_window.assert_not_called()
+        set_hwnd.assert_called_once_with(12345, "12345")
+
     def test_capture_wrapper_exports_windows_backend(self):
         from capture import Capture
         from platforms.windows.capture import WindowsCaptureBackend

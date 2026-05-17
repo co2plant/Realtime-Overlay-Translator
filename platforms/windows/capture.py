@@ -67,7 +67,7 @@ class WindowsCaptureBackend:
             if win32gui.IsWindowVisible(hwnd):
                 title = win32gui.GetWindowText(hwnd)
                 if title:
-                    windows.append(WindowInfo(id=title, title=title))
+                    windows.append(WindowInfo(id=str(hwnd), title=title))
 
         win32gui.EnumWindows(_enum_handler, None)
         return windows
@@ -82,8 +82,18 @@ class WindowsCaptureBackend:
         target_list.extend(window.title for window in WindowsCaptureBackend._list_windows())
 
     def select_window(self, window_id: str) -> None:
-        """Select a visible window by title."""
-        hwnd = win32gui.FindWindow(None, window_id)
+        """Select a visible window by HWND string ID, or by title for legacy callers."""
+        hwnd = 0
+        try:
+            candidate_hwnd = int(window_id)
+        except ValueError:
+            candidate_hwnd = 0
+
+        if candidate_hwnd and win32gui.IsWindow(candidate_hwnd):
+            hwnd = candidate_hwnd
+        else:
+            hwnd = win32gui.FindWindow(None, window_id)
+
         logger.info("Window handle for '%s': %s", window_id, hwnd)
         self._set_hwnd(hwnd, window_id)
 
