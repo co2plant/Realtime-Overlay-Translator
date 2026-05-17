@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from typing import Sequence
 
 import numpy as np
@@ -122,14 +123,27 @@ class WindowsCaptureBackend:
             screenshot_path = os.path.join(_BASE_DIR, "images", "img1.png")
             cv2.imwrite(screenshot_path, img)
         finally:
+            cleanup_errors = []
+            active_exception = sys.exc_info()[0] is not None
+
+            def _cleanup(label, action):
+                try:
+                    action()
+                except Exception as exc:
+                    cleanup_errors.append(exc)
+                    logger.warning("Failed to release %s", label, exc_info=True)
+
             if c_dc is not None:
-                c_dc.DeleteDC()
+                _cleanup("compatible device context", c_dc.DeleteDC)
             if dc_obj is not None:
-                dc_obj.DeleteDC()
+                _cleanup("window device context wrapper", dc_obj.DeleteDC)
             if w_dc:
-                win32gui.ReleaseDC(self._hwnd, w_dc)
+                _cleanup("window device context", lambda: win32gui.ReleaseDC(self._hwnd, w_dc))
             if bitmap_created and bitmap is not None:
-                win32gui.DeleteObject(bitmap.GetHandle())
+                _cleanup("bitmap", lambda: win32gui.DeleteObject(bitmap.GetHandle()))
+
+            if cleanup_errors and not active_exception:
+                raise cleanup_errors[0]
 
         return img
 

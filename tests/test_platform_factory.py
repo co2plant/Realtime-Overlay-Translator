@@ -37,6 +37,21 @@ class PlatformFactoryTests(unittest.TestCase):
 
         self.assertIsInstance(backend, FakeWindowsCaptureBackend)
 
+    def test_windows_overlay_factory_returns_windows_backend(self):
+        class FakeWindowsOverlayBackend:
+            pass
+
+        with (
+            patch("sys.platform", "win32"),
+            patch(
+                "platforms.windows.overlay.WindowsOverlayBackend",
+                FakeWindowsOverlayBackend,
+            ),
+        ):
+            backend = create_overlay_backend()
+
+        self.assertIsInstance(backend, FakeWindowsOverlayBackend)
+
     def test_windows_capture_screenshot_releases_gdi_resources_on_error(self):
         from platforms.windows import capture as windows_capture
         from platforms.windows.capture import WindowsCaptureBackend
@@ -70,6 +85,43 @@ class PlatformFactoryTests(unittest.TestCase):
         compatible_dc.DeleteDC.assert_called_once_with()
         release_dc.assert_called_once_with(10, 30)
         delete_object.assert_called_once_with(20)
+
+    def test_windows_capture_cleanup_failure_does_not_mask_capture_error(self):
+        from platforms.windows import capture as windows_capture
+        from platforms.windows.capture import WindowsCaptureBackend
+
+        backend = WindowsCaptureBackend.__new__(WindowsCaptureBackend)
+        backend._hwnd = 10
+        backend._width = 2
+        backend._height = 2
+        backend._cropped_x = 0
+        backend._cropped_y = 0
+
+        dc_obj = Mock()
+        compatible_dc = Mock()
+        bitmap = Mock()
+        dc_obj.CreateCompatibleDC.return_value = compatible_dc
+        bitmap.GetBitmapBits.side_effect = RuntimeError("bitmap read failed")
+        bitmap.GetHandle.return_value = 20
+        compatible_dc.DeleteDC.side_effect = RuntimeError("cleanup failed")
+
+        with (
+            patch.dict(sys.modules, {"cv2": Mock()}),
+            patch.object(windows_capture.win32gui, "GetWindowDC", return_value=30),
+            patch.object(windows_capture.win32ui, "CreateDCFromHandle", return_value=dc_obj),
+            patch.object(windows_capture.win32ui, "CreateBitmap", return_value=bitmap),
+            patch.object(windows_capture.win32gui, "ReleaseDC") as release_dc,
+            patch.object(windows_capture.win32gui, "DeleteObject") as delete_object,
+            patch.object(windows_capture.logger, "warning") as warning,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "bitmap read failed"):
+                backend.get_screenshot()
+
+        compatible_dc.DeleteDC.assert_called_once_with()
+        dc_obj.DeleteDC.assert_called_once_with()
+        release_dc.assert_called_once_with(10, 30)
+        delete_object.assert_called_once_with(20)
+        warning.assert_called_once()
 
     def test_windows_capture_list_window_names_does_not_construct_backend(self):
         from platforms.windows import capture as windows_capture
