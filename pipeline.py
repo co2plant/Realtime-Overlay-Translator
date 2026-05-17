@@ -1,11 +1,12 @@
 """
-Translation pipeline – orchestrates capture → OCR → translate → overlay.
+Translation pipeline: orchestrates capture, OCR, translate, and overlay.
 
 This module encapsulates the business logic that was previously inside
 the global ``while_loop()`` function in *main.py*, making it testable
 and independent of the GUI layer.
 """
 
+import inspect
 import logging
 from collections.abc import Callable
 
@@ -22,8 +23,40 @@ logger = logging.getLogger(__name__)
 _POSITION_SENTINEL = 10_000
 
 
+def _use_legacy_display_callback(display_callback: Callable[..., None]) -> bool:
+    try:
+        signature = inspect.signature(display_callback)
+    except (TypeError, ValueError):
+        return False
+
+    if any(
+        parameter.kind == parameter.VAR_POSITIONAL
+        for parameter in signature.parameters.values()
+    ):
+        return False
+
+    required_positional_parameters = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind
+        in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
+        and parameter.default == parameter.empty
+    ]
+    return len(required_positional_parameters) > 1
+
+
+def _display_overlay_text(
+    display_callback: Callable[[OverlayText], None],
+    item: OverlayText,
+) -> None:
+    if _use_legacy_display_callback(display_callback):
+        display_callback(item.text, item.x, item.y, item.width, item.height, item.font_size)
+    else:
+        display_callback(item)
+
+
 class TranslationPipeline:
-    """Runs one capture→OCR→translate→overlay cycle and schedules the next."""
+    """Runs one capture-OCR-translate-overlay cycle and schedules the next."""
 
     def __init__(
         self,
@@ -56,8 +89,9 @@ class TranslationPipeline:
         Parameters
         ----------
         display_callback:
-            ``display_callback(text, x, y, width, height, font_size)``
-            — called for every translated text block that should be rendered.
+            Receives an ``OverlayText`` for every translated text block. Legacy
+            six-argument callbacks are also supported until the GUI layer is
+            migrated.
         """
         logger.debug("Pipeline cycle start")
 
@@ -72,35 +106,13 @@ class TranslationPipeline:
         source_lang = self._config.translate_source_lang
         target_lang = self._config.translate_target_lang
 
-        total = len(result["text"])
-        for i in range(total):
-            text = result["text"][i]
-            conf = int(result["conf"][i])
+        def emit_detected_words(boundary_index: int) -> None:
+            nonlocal min_left, min_top
 
-            # Detect sentence boundaries: large horizontal/vertical gap or end of data
-            is_boundary = False
-            if i > 0:
-                prev_right = result["left"][i - 1] + result["width"][i - 1] + result["height"][i - 1]
-                prev_bottom = result["top"][i - 1] + result["height"][i - 1] * 1.2
-                if prev_right < result["left"][i] or prev_bottom < result["top"][i]:
-                    is_boundary = True
+            final_result = " ".join(detected_words)
+            detected_words.clear()
 
-            if not is_boundary and conf > confidence_threshold:
-                # Keep only ASCII characters (strip non-ASCII)
-                clean = "".join(c if ord(c) < 128 else "" for c in text).strip()
-                if result["left"][i] < min_left:
-                    min_left = result["left"][i]
-                if result["top"][i] < min_top:
-                    min_top = result["top"][i]
-                detected_words.append(clean)
-
-            if is_boundary or i == total - 1:
-                final_result = " ".join(detected_words)
-                detected_words.clear()
-
-                if not final_result or len(final_result) <= 1 or final_result.isspace():
-                    continue
-
+            if final_result and len(final_result) > 1 and not final_result.isspace():
                 # Look up cache first, translate on miss
                 cached = self._csv.search(final_result)
                 if cached is False:
@@ -119,18 +131,55 @@ class TranslationPipeline:
                     final_result = cached
 
                 if len(final_result) >= 1:
-                    display_callback(
+                    _display_overlay_text(
+                        display_callback,
                         OverlayText(
                             text=final_result,
                             x=min_left + frame.screen_x,
                             y=min_top + frame.screen_y,
-                            width=result["left"][i] - min_left + result["width"][i],
-                            height=result["top"][i] - min_top + result["height"][i],
+                            width=(
+                                result["left"][boundary_index]
+                                - min_left
+                                + result["width"][boundary_index]
+                            ),
+                            height=(
+                                result["top"][boundary_index]
+                                - min_top
+                                + result["height"][boundary_index]
+                            ),
                             font_size=11,
-                        )
+                        ),
                     )
 
-                min_left = _POSITION_SENTINEL
-                min_top = _POSITION_SENTINEL
+            min_left = _POSITION_SENTINEL
+            min_top = _POSITION_SENTINEL
+
+        total = len(result["text"])
+        for i in range(total):
+            text = result["text"][i]
+            conf = int(result["conf"][i])
+
+            # Detect sentence boundaries: large horizontal/vertical gap or end of data
+            is_boundary = False
+            if i > 0:
+                prev_right = result["left"][i - 1] + result["width"][i - 1] + result["height"][i - 1]
+                prev_bottom = result["top"][i - 1] + result["height"][i - 1] * 1.2
+                if prev_right < result["left"][i] or prev_bottom < result["top"][i]:
+                    is_boundary = True
+
+            if is_boundary:
+                emit_detected_words(i)
+
+            if conf > confidence_threshold:
+                # Keep only ASCII characters (strip non-ASCII)
+                clean = "".join(c if ord(c) < 128 else "" for c in text).strip()
+                if result["left"][i] < min_left:
+                    min_left = result["left"][i]
+                if result["top"][i] < min_top:
+                    min_top = result["top"][i]
+                detected_words.append(clean)
+
+            if i == total - 1:
+                emit_detected_words(i)
 
         logger.debug("Pipeline cycle complete")
