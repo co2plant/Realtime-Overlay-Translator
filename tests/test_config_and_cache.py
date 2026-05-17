@@ -44,6 +44,50 @@ class ConfigAndCacheTests(unittest.TestCase):
                 self.assertEqual(cache.search("Hello"), "안녕하세요")
                 self.assertFalse(cache.search("Missing"))
 
+    def test_missing_cache_file_returns_false(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("savecsv._CSV_DIR", tmp):
+                cache = SaveCsv(
+                    "Chrome",
+                    backend="local_dummy",
+                    source_lang="en",
+                    target_lang="ko",
+                )
+
+                self.assertFalse(cache.search("Missing"))
+
+    def test_malformed_one_column_matching_row_returns_false(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("savecsv._CSV_DIR", tmp):
+                cache = SaveCsv(
+                    "Chrome",
+                    backend="local_dummy",
+                    source_lang="en",
+                    target_lang="ko",
+                )
+
+                with open(cache.file_path, "w", encoding="utf-8", newline="") as f:
+                    f.write("Hello\n")
+
+                self.assertFalse(cache.search("Hello"))
+
+    def test_config_translation_backend_properties_round_trip_without_saving(self):
+        original_instance = config.Config._instance
+        config.Config._instance = None
+        try:
+            with patch.object(config.Config, "_save", return_value=None):
+                cfg = config.Config()
+
+                cfg.translation_backend = "disabled"
+                cfg.local_model_path = "models/demo"
+                cfg.papago_enabled = True
+
+                self.assertEqual(cfg.translation_backend, "disabled")
+                self.assertEqual(cfg.local_model_path, "models/demo")
+                self.assertTrue(cfg.papago_enabled)
+        finally:
+            config.Config._instance = original_instance
+
 
 if __name__ == "__main__":
     unittest.main()

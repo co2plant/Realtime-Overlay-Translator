@@ -66,7 +66,7 @@ class SaveCsv:
             data = list(reader)
 
         for row in data:
-            if row and row[0] == input_text:
+            if len(row) >= 2 and row[0] == input_text:
                 return row[1]
 
         return False
