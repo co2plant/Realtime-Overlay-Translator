@@ -58,8 +58,8 @@ class WindowsCaptureBackend:
         self._offset_x = left + self._cropped_x
         self._offset_y = top + self._cropped_y
 
-    def list_windows(self) -> list[WindowInfo]:
-        """Return visible windows."""
+    @staticmethod
+    def _list_windows() -> list[WindowInfo]:
         windows: list[WindowInfo] = []
 
         def _enum_handler(hwnd, _ctx):
@@ -71,11 +71,14 @@ class WindowsCaptureBackend:
         win32gui.EnumWindows(_enum_handler, None)
         return windows
 
+    def list_windows(self) -> list[WindowInfo]:
+        """Return visible windows."""
+        return self._list_windows()
+
     @staticmethod
     def list_window_names(target_list: list[str]) -> None:
         """Backward-compatible visible window title collector."""
-        backend = WindowsCaptureBackend()
-        target_list.extend(window.title for window in backend.list_windows())
+        target_list.extend(window.title for window in WindowsCaptureBackend._list_windows())
 
     def select_window(self, window_id: str) -> None:
         """Select a visible window by title."""
@@ -87,34 +90,46 @@ class WindowsCaptureBackend:
         """Return a BGR numpy array of the selected window content."""
         import cv2
 
-        w_dc = win32gui.GetWindowDC(self._hwnd)
-        dc_obj = win32ui.CreateDCFromHandle(w_dc)
-        c_dc = dc_obj.CreateCompatibleDC()
-        bitmap = win32ui.CreateBitmap()
-        bitmap.CreateCompatibleBitmap(dc_obj, self._width, self._height)
-        c_dc.SelectObject(bitmap)
-        c_dc.BitBlt(
-            (0, 0),
-            (self._width, self._height),
-            dc_obj,
-            (self._cropped_x, self._cropped_y),
-            win32con.SRCCOPY,
-        )
+        w_dc = None
+        dc_obj = None
+        c_dc = None
+        bitmap = None
+        bitmap_created = False
 
-        signed_ints = bitmap.GetBitmapBits(True)
-        img = np.frombuffer(signed_ints, dtype="uint8")
-        img.shape = (self._height, self._width, 4)
+        try:
+            w_dc = win32gui.GetWindowDC(self._hwnd)
+            dc_obj = win32ui.CreateDCFromHandle(w_dc)
+            c_dc = dc_obj.CreateCompatibleDC()
+            bitmap = win32ui.CreateBitmap()
+            bitmap.CreateCompatibleBitmap(dc_obj, self._width, self._height)
+            bitmap_created = True
+            c_dc.SelectObject(bitmap)
+            c_dc.BitBlt(
+                (0, 0),
+                (self._width, self._height),
+                dc_obj,
+                (self._cropped_x, self._cropped_y),
+                win32con.SRCCOPY,
+            )
 
-        dc_obj.DeleteDC()
-        c_dc.DeleteDC()
-        win32gui.ReleaseDC(self._hwnd, w_dc)
-        win32gui.DeleteObject(bitmap.GetHandle())
+            signed_ints = bitmap.GetBitmapBits(True)
+            img = np.frombuffer(signed_ints, dtype="uint8")
+            img.shape = (self._height, self._width, 4)
 
-        img = img[..., :3]
-        img = np.ascontiguousarray(img)
+            img = img[..., :3]
+            img = np.ascontiguousarray(img)
 
-        screenshot_path = os.path.join(_BASE_DIR, "images", "img1.png")
-        cv2.imwrite(screenshot_path, img)
+            screenshot_path = os.path.join(_BASE_DIR, "images", "img1.png")
+            cv2.imwrite(screenshot_path, img)
+        finally:
+            if c_dc is not None:
+                c_dc.DeleteDC()
+            if dc_obj is not None:
+                dc_obj.DeleteDC()
+            if w_dc:
+                win32gui.ReleaseDC(self._hwnd, w_dc)
+            if bitmap_created and bitmap is not None:
+                win32gui.DeleteObject(bitmap.GetHandle())
 
         return img
 
