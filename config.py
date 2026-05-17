@@ -20,6 +20,9 @@ DEFAULT_CONFIG = {
     "ocr_languages": "eng+kor",
     "translate_source_lang": "en",
     "translate_target_lang": "ko",
+    "translation_backend": "local_dummy",
+    "local_model_path": "",
+    "papago_enabled": False,
     "capture_interval_ms": 1000,
     "ocr_confidence_threshold": 70,
 }
@@ -116,6 +119,30 @@ class Config:
     @property
     def translate_target_lang(self) -> str:
         return self.get("translate_target_lang", "ko")
+
+    @property
+    def translation_backend(self) -> str:
+        return self.get("translation_backend", "local_dummy")
+
+    @translation_backend.setter
+    def translation_backend(self, value: str) -> None:
+        self.set("translation_backend", value)
+
+    @property
+    def local_model_path(self) -> str:
+        return self.get("local_model_path", "")
+
+    @local_model_path.setter
+    def local_model_path(self, value: str) -> None:
+        self.set("local_model_path", value)
+
+    @property
+    def papago_enabled(self) -> bool:
+        return bool(self.get("papago_enabled", False))
+
+    @papago_enabled.setter
+    def papago_enabled(self, value: bool) -> None:
+        self.set("papago_enabled", bool(value))
 
     @property
     def capture_interval_ms(self) -> int:
