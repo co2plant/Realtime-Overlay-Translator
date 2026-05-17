@@ -32,6 +32,13 @@ class TranslationBackendTests(unittest.TestCase):
         self.assertEqual(result.text, "Hello")
 
     def test_factory_creates_dummy_by_default(self):
+        config = SimpleNamespace()
+
+        translator = create_translator(config)
+
+        self.assertIsInstance(translator, LocalDummyTranslator)
+
+    def test_factory_creates_dummy_when_configured(self):
         config = SimpleNamespace(translation_backend="local_dummy")
 
         translator = create_translator(config)
@@ -89,6 +96,22 @@ class TranslationBackendTests(unittest.TestCase):
         translator = PapagoTranslator(SimpleNamespace(client_id="id", client_secret="secret"))
         response = Mock()
         response.getcode.return_value = 500
+
+        with patch("translate.urllib.request.urlopen", return_value=response), patch(
+            "translate.logger.error"
+        ):
+            result = translator.translate("Hello", "en", "ko")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.backend, "papago")
+        self.assertEqual(result.text, "Hello")
+        self.assertNotEqual(result.error, "")
+
+    def test_papago_translate_returns_failure_result_on_malformed_json_shape(self):
+        translator = PapagoTranslator(SimpleNamespace(client_id="id", client_secret="secret"))
+        response = Mock()
+        response.getcode.return_value = 200
+        response.read.return_value = b"null"
 
         with patch("translate.urllib.request.urlopen", return_value=response), patch(
             "translate.logger.error"

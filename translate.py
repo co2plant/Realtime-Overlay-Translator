@@ -132,7 +132,7 @@ class PapagoTranslator:
             response_body = response.read()
             decoded = json.loads(response_body.decode("utf-8"))
             translated = decoded["message"]["result"]["translatedText"]
-        except (KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        except (KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             error = f"Papago response parse failed: {exc}"
             logger.error(error)
             return TranslationResult(text=text, success=False, backend=self.backend, error=error)
