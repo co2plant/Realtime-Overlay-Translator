@@ -41,6 +41,7 @@ class Translator(Protocol):
         target_lang: str,
     ) -> TranslationResult:
         """Translate text from source_lang to target_lang."""
+        ...
 
 
 class LocalDummyTranslator:

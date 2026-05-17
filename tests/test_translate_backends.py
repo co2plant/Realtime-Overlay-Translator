@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from translate import (
     DisabledTranslator,
@@ -55,6 +55,50 @@ class TranslationBackendTests(unittest.TestCase):
 
     def test_papago_compatibility_alias_exists(self):
         self.assertIs(TranslatorPapago, PapagoTranslator)
+
+    def test_papago_translate_returns_success_result_on_200_response(self):
+        translator = PapagoTranslator(SimpleNamespace(client_id="id", client_secret="secret"))
+        response = Mock()
+        response.getcode.return_value = 200
+        response.read.return_value = (
+            b'{"message":{"result":{"translatedText":"\\uc548\\ub155\\ud558\\uc138\\uc694"}}}'
+        )
+
+        with patch("translate.urllib.request.urlopen", return_value=response):
+            result = translator.translate("Hello", "en", "ko")
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.backend, "papago")
+        self.assertEqual(result.text, "\uc548\ub155\ud558\uc138\uc694")
+        self.assertEqual(result.error, "")
+
+    def test_papago_translate_returns_failure_result_on_request_exception(self):
+        translator = PapagoTranslator(SimpleNamespace(client_id="id", client_secret="secret"))
+
+        with patch("translate.urllib.request.urlopen", side_effect=RuntimeError("failed")), patch(
+            "translate.logger.error"
+        ):
+            result = translator.translate("Hello", "en", "ko")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.backend, "papago")
+        self.assertEqual(result.text, "Hello")
+        self.assertNotEqual(result.error, "")
+
+    def test_papago_translate_returns_failure_result_on_non_200_response(self):
+        translator = PapagoTranslator(SimpleNamespace(client_id="id", client_secret="secret"))
+        response = Mock()
+        response.getcode.return_value = 500
+
+        with patch("translate.urllib.request.urlopen", return_value=response), patch(
+            "translate.logger.error"
+        ):
+            result = translator.translate("Hello", "en", "ko")
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.backend, "papago")
+        self.assertEqual(result.text, "Hello")
+        self.assertNotEqual(result.error, "")
 
     def test_papago_get_translate_returns_text_on_success_result(self):
         translator = PapagoTranslator(SimpleNamespace(client_id="id", client_secret="secret"))
