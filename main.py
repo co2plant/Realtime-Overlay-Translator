@@ -58,6 +58,7 @@ class App(_AppBase):
 
         self._config = Config()
         self._window_name: str | None = None
+        self._window_title_to_id: dict[str, str] = {}
         self._overlay: OverlayBackend | None = None
         self._pipeline: TranslationPipeline | None = None
 
@@ -266,17 +267,20 @@ class App(_AppBase):
     def _on_detect(self) -> None:
         logger.info("Detecting visible windows")
         capture_backend = create_capture_backend(self._config)
-        window_names = [window.title for window in capture_backend.list_windows()]
+        windows = capture_backend.list_windows()
+        self._window_title_to_id = {window.title: window.id for window in windows}
+        window_names = [window.title for window in windows]
         self._combo.configure(values=window_names)
         if window_names:
             self._combo.set(window_names[0])
             self._on_window_selected(window_names[0])
 
     def _on_window_selected(self, choice: str) -> None:
-        logger.info("Window selected: %s", choice)
+        window_id = getattr(self, "_window_title_to_id", {}).get(choice, choice)
+        logger.info("Window selected: %s (%s)", choice, window_id)
         if self._start_btn.cget("state") == "disabled":
             self._start_btn.configure(state="normal")
-        self._window_name = choice
+        self._window_name = window_id
 
     def _on_start(self) -> None:
         if self._window_name is None:
@@ -306,10 +310,15 @@ class App(_AppBase):
 
     def _on_save_settings(self) -> None:
         backend_label = self._backend_menu.get()
-        self._config.translation_backend = BACKEND_LABEL_TO_VALUE[backend_label]
-        self._config.client_id = self._entry_id.get()
-        self._config.client_secret = self._entry_secret.get()
-        self._config.papago_enabled = self._config.translation_backend == "papago"
+        translation_backend = BACKEND_LABEL_TO_VALUE[backend_label]
+        self._config.update(
+            {
+                "translation_backend": translation_backend,
+                "client_id": self._entry_id.get(),
+                "client_secret": self._entry_secret.get(),
+                "papago_enabled": translation_backend == "papago",
+            }
+        )
         logger.info("Settings saved")
 
     # ==================================================================
