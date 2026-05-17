@@ -52,6 +52,17 @@ class TranslationBackendTests(unittest.TestCase):
 
         self.assertIsInstance(translator, DisabledTranslator)
 
+    def test_factory_uses_config_get_when_available(self):
+        class GetConfig:
+            def get(self, key, default=None):
+                if key == "translation_backend":
+                    return "disabled"
+                return default
+
+        translator = create_translator(GetConfig())
+
+        self.assertIsInstance(translator, DisabledTranslator)
+
     def test_factory_rejects_unknown_backend(self):
         config = SimpleNamespace(translation_backend="unknown")
 

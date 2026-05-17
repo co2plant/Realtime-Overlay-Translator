@@ -163,7 +163,11 @@ TranslatorPapago = PapagoTranslator
 def create_translator(config: Config | None = None) -> Translator:
     """Create the configured translation backend."""
     config = config or Config()
-    backend = getattr(config, "translation_backend", "local_dummy")
+    config_get = getattr(config, "get", None)
+    if callable(config_get):
+        backend = config_get("translation_backend", "local_dummy")
+    else:
+        backend = getattr(config, "translation_backend", "local_dummy")
 
     if backend == "local_dummy":
         return LocalDummyTranslator()
